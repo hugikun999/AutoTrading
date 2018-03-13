@@ -2,6 +2,17 @@ import numpy as np
 import pandas as pd
 import os
 
+def cal_MA(price):
+	total_5 = 0
+	total_10 = 0
+	for i in range(10):
+		if i < 5:
+			total_5	+= price[9 - i]
+		total_10 += price[9 - i]
+	total_5 /= 5
+	total_10 /= 10
+	return total_5, total_10
+
 def get_act(act):
 	act += 1
 	prob = table[act]
@@ -12,15 +23,14 @@ def get_act(act):
 			break
 	return action
 
-def cal_prob():
+def cal_prob(pd_training):
 	for i in range(3):
 		for k in range(3):
 			table.setdefault(i, []).append(0)
-	train = pd.read_csv(args.training)
-	for i in range(len(train)):
-		if i < (len(train) - 1):
-			first = train.loc[i, 'action']
-			second = train.loc[i+1, 'action']
+	for i in range(len(pd_training)):
+		if i < (len(pd_training) - 1):
+			first = pd_training.loc[i, 'action']
+			second = pd_training.loc[i+1, 'action']
 			table[first + 1][second + 1] += 1
 
 	for i in range(3):
@@ -30,28 +40,20 @@ def cal_prob():
 	return table
 
 def preprocess():
-	train = open(args.training, 'r')
-	out = open('header_training.csv', 'w')
-	out.write("open,high,low,close\n")
-	for line in train:
-		out.write(line)
-	train.closed
-	out.closed
-	os.rename('header_training.csv', args.training)
-	train = pd.read_csv(args.training)
+	train = pd.read_csv(args.training, header=None)
 	train['action'] = 0
 	for i in range(len(train)):
 		if i < (len(train) - 1):
-			f_open = train.at[i, 'open']
-			s_open = train.at[i+1, 'open']
+			f_open = train.loc[i, 0]
+			s_open = train.loc[i+1, 0]
 			diff = s_open - f_open
 			if diff > 1:
-				train.loc[i, 'action'] = -1
-			elif diff < -1:
 				train.loc[i, 'action'] = 1
+			elif diff < -1:
+				train.loc[i, 'action'] = -1
 			else:
 				train.loc[i, 'action'] = 0
-	train.to_csv(args.training, index=False)
+	return train
 
 status = 0
 table = {}
@@ -70,12 +72,12 @@ if __name__ == '__main__':
                         default='output.csv',
                         help='output file name')
 	args = parser.parse_args()
-	preprocess()
-	table = cal_prob()
+	pd_training = preprocess()
+	table = cal_prob(pd_training)
 	num_lines = sum(1 for line in open(args.testing))
 
 	count = 0
-	total_count = [0,0,0]
+	close_price = []
 	testing_data = open(args.testing, 'r')
 	with open(args.output, 'w') as output_file:
 		for line in testing_data:
@@ -84,13 +86,14 @@ if __name__ == '__main__':
 			value = []
 			for i in range(len(line)):
 				value.append(float(line[i]))
+
 			if count == 0:
+				close_price.append(value[3])
 				yes_ope = value[0]
 				output_file.write('1\n')
 				status = 1
-			elif count == num_lines - 1:
-				break
-			else:
+			elif count < 10:
+				close_price.append(value[3])
 				ope = value[0]
 				diff = ope - yes_ope
 				if diff > 1:
@@ -104,6 +107,24 @@ if __name__ == '__main__':
 				yes_ope = value[0]
 				output_file.write(str(act))
 				output_file.write('\n')
+			elif count == num_lines - 1:
+				break
+			else:
+				close_price.pop(0)
+				close_price.append(value[3])
+				MA5, MA10 = cal_MA(close_price)
+				if value[3] > MA5 and MA5 > MA10:
+						act = 1
+				elif value[3] < MA5 and MA5 < MA10:
+						act = -1
+				else:
+					act = 0
+
+				check = status + act
+				if check > 1 or check < -1:
+					act = 0
+				
+				status += act
+				output_file.write(str(act))
+				output_file.write('\n')
 			count += 1
-			total_count[status] += 1
-	print(total_count)
